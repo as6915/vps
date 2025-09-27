@@ -1,0 +1,58 @@
+name: Persistent VPS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/330 * * * *" # كل 5 ساعات ونص
+
+jobs:
+  vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      # 1. SSH Setup
+      - name: Setup SSH
+        run: |
+          sudo apt update -y
+          sudo apt install -y openssh-server
+          echo "root:admin@123" | sudo chpasswd
+          echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
+          sudo service ssh restart
+          echo "✅ SSH user: root | pass: admin@123"
+
+      # 2. Tailscale Setup
+      - name: Setup Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=vps-${{ github.run_id }}
+          tsIP=$(tailscale ip -4 | head -n 1)
+          echo "TAILSCALE_IP=$tsIP" >> $GITHUB_ENV
+          echo "✅ Tailscale IP: $tsIP"
+
+      # 3. rclone (Google Drive) - محتاج منك كمان rclone.conf
+      - name: Install rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
+          echo "✅ rclone configured"
+
+      - name: Mount Google Drive
+        run: |
+          mkdir -p /root/data
+          nohup rclone mount gdrive:/vps-data /root/data --allow-other --vfs-cache-mode writes &
+          sleep 10
+          echo "✅ Google Drive mounted at /root/data"
+
+      # 4. Keep Alive
+      - name: Keep Alive
+        run: |
+          echo "[$(date)] VPS Started with persistent storage"
+          while true; do
+            echo "[$(date)] VPS still alive..."
+            sleep 300
+          done
